@@ -1,0 +1,16 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<div style="padding: 20px; background: #1a1a1a; border-radius: 8px; color: white; border: 1px solid #333;">
+    <h2 style="margin-bottom: 20px; font-weight: bold;">{{ title }}</h2>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div style="margin-bottom: 20px;">
+            {{ form.as_p }}
+        </div>
+        <button type="submit" style="background: #6c5ce7; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            SUBIR E IMPORTAR CANALES
+        </button>
+        <a href="../" style="margin-left: 10px; color: #aaa; text-decoration: none;">Cancelar</a>
+    </form>
+</div>
+{% endblock %}
