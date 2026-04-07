@@ -6,6 +6,7 @@ from django.contrib import messages
 from .models import UsuarioIPTV, Canal, Categoria, Reseller, Plan
 from django.utils import timezone
 from datetime import timedelta
+from django.views.decorators.csrf import csrf_exempt
 import time
 
 from django.http import JsonResponse, HttpResponse
@@ -19,10 +20,16 @@ from datetime import timedelta
 import time
 
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
+# --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
+@csrf_exempt  # <--- AGREGAR ESTO ES VITAL
+
 def player_api(request):
     u = request.GET.get('username')
     p = request.GET.get('password')
     action = request.GET.get('action')
+
+    # LOG PARA DEBUG (Opcional, pero te ayuda a ver qué llega en la terminal)
+    # print(f"Login attempt: {u} / Action: {action}")
 
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
@@ -30,9 +37,11 @@ def player_api(request):
             user.ultima_actividad = timezone.now()
             user.save()
     except UsuarioIPTV.DoesNotExist:
-        return JsonResponse({"error": "Unauthorized"}, status=403)
+        # Importante: Smarters a veces espera un 200 con un JSON de error 
+        # en lugar de un 403 real para no cerrarse.
+        return JsonResponse({"user_info": {"auth": 0}}, status=200) 
 
-    # 1. LOGIN INICIAL (Configurado para forzar puerto 80)
+    # 1. LOGIN INICIAL
     if not action:
         return JsonResponse({
             "user_info": {
@@ -51,14 +60,15 @@ def player_api(request):
             "server_info": {
                 "url": "1.lurzatv.com.ar",
                 "port": "80",
-                "https_port": "80", # Engañamos a la app para que no salte a 443
-                "server_protocol": "http", # <--- FORZAMOS HTTP
+                "https_port": "80",
+                "server_protocol": "http",
                 "rtmp_port": "80",
                 "timezone": "America/Argentina/Buenos_Aires",
                 "timestamp": int(time.time())
             }
         })
-
+    
+    # ... (El resto del código de categorías y canales sigue igual)
     # 2. CATEGORÍAS
     elif action == "get_live_categories":
         return JsonResponse([
