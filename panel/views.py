@@ -23,25 +23,30 @@ import time
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
 @csrf_exempt  # <--- AGREGAR ESTO ES VITAL
 
+@csrf_exempt
 def player_api(request):
-    u = request.GET.get('username')
-    p = request.GET.get('password')
-    action = request.GET.get('action')
+    # Buscamos en GET y en POST por las dudas, y quitamos espacios en blanco
+    u = (request.GET.get('username') or request.POST.get('username') or "").strip()
+    p = (request.GET.get('password') or request.POST.get('password') or "").strip()
+    action = request.GET.get('action') or request.POST.get('action')
 
-    # LOG PARA DEBUG (Opcional, pero te ayuda a ver qué llega en la terminal)
-    # print(f"Login attempt: {u} / Action: {action}")
+    # Log para que veas en la terminal qué llega exactamente
+    print(f"DEBUG: Login con User: '{u}' y Pass: '{p}' | Action: {action}")
 
     try:
+        # Buscamos al usuario
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
+        
         if not action:
             user.ultima_actividad = timezone.now()
             user.save()
+            
     except UsuarioIPTV.DoesNotExist:
-        # Importante: Smarters a veces espera un 200 con un JSON de error 
-        # en lugar de un 403 real para no cerrarse.
-        return JsonResponse({"user_info": {"auth": 0}}, status=200) 
+        # Si no lo encuentra, devolvemos auth: 0 pero imprimimos el error
+        print(f"❌ LOGIN FALLIDO para: {u}")
+        return JsonResponse({"user_info": {"auth": 0}}, status=200)
 
-    # 1. LOGIN INICIAL
+    # --- De aquí para abajo el resto de tu código de login, categorías y canales ---
     if not action:
         return JsonResponse({
             "user_info": {
