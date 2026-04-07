@@ -47,20 +47,23 @@ def player_api(request):
         return JsonResponse({"user_info": {"auth": 0}}, status=200)
 
     # --- De aquí para abajo el resto de tu código de login, categorías y canales ---
+# 1. LOGIN INICIAL (Ajustado para máxima compatibilidad)
     if not action:
+        # Convertimos la fecha a un formato que Smarters entienda siempre (Timestamp entero)
+        exp_timestamp = int(user.fecha_expiracion.timestamp())
+        
         return JsonResponse({
             "user_info": {
+                "username": str(user.username),
+                "password": str(user.password),
                 "auth": 1,
                 "status": "Active",
-                "exp_date": str(int(user.fecha_expiracion.timestamp())),
-                "username": user.username,
-                "password": user.password,
-                "message": "Bienvenido a Lurzavic",
+                "exp_date": str(exp_timestamp),
+                "is_trial": "0",
                 "active_cons": "0",
                 "max_connections": str(user.plan.max_conexiones),
-                "is_trial": "0",
                 "revocation": "0",
-                "trial_finished": False
+                "allowed_output_formats": ["m3u8", "ts", "rtmp"]
             },
             "server_info": {
                 "url": "1.lurzatv.com.ar",
