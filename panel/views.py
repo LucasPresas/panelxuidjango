@@ -8,6 +8,17 @@ from django.utils import timezone
 from datetime import timedelta
 import time
 
+from django.http import JsonResponse, HttpResponse
+from django.shortcuts import render, redirect
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
+from django.contrib import messages
+from .models import UsuarioIPTV, Canal, Categoria, Reseller, Plan
+from django.utils import timezone
+from datetime import timedelta
+import time
+
+# --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
 def player_api(request):
     u = request.GET.get('username')
     p = request.GET.get('password')
@@ -21,7 +32,7 @@ def player_api(request):
     except UsuarioIPTV.DoesNotExist:
         return JsonResponse({"error": "Unauthorized"}, status=403)
 
-    # LOGIN INICIAL
+    # 1. LOGIN INICIAL (Configurado para forzar puerto 80)
     if not action:
         return JsonResponse({
             "user_info": {
@@ -38,28 +49,28 @@ def player_api(request):
                 "trial_finished": False
             },
             "server_info": {
-                "url": request.get_host().split(':')[0],
+                "url": "1.lurzatv.com.ar",
                 "port": "80",
-                "https_port": "443",
-                "server_protocol": "http",
+                "https_port": "80", # Engañamos a la app para que no salte a 443
+                "server_protocol": "http", # <--- FORZAMOS HTTP
                 "rtmp_port": "80",
                 "timezone": "America/Argentina/Buenos_Aires",
                 "timestamp": int(time.time())
             }
         })
 
-    # CATEGORÍAS
+    # 2. CATEGORÍAS
     elif action == "get_live_categories":
         return JsonResponse([
             {
                 "category_id": str(c.id), 
                 "category_name": c.nombre, 
-                "parent_id": 0 # Agregado para paridad con Flask
+                "parent_id": 0 
             } 
             for c in Categoria.objects.all()
         ], safe=False)
 
-    # CANALES (Versión detallada para evitar crash)
+    # 3. CANALES (Copia exacta de tu lógica de Flask)
     elif action == "get_live_streams":
         category_id = request.GET.get('category_id')
         canales = Canal.objects.all()
@@ -72,7 +83,7 @@ def player_api(request):
             streams.append({
                 "num": i + 1,
                 "name": c.nombre,
-                "stream_type": "live", # CRÍTICO
+                "stream_type": "live", 
                 "stream_id": int(c.id),
                 "stream_icon": c.logo if c.logo else "",
                 "epg_channel_id": "", 
@@ -86,23 +97,28 @@ def player_api(request):
             })
         return JsonResponse(streams, safe=False)
 
-    # VOD y SERIES (Vacío pero formato correcto)
+    # 4. VOD y SERIES (Vacío pero formato correcto)
     elif action in ["get_vod_streams", "get_vod_categories", "get_series", "get_series_categories"]:
         return JsonResponse([], safe=False) 
 
     return JsonResponse({"error": "Unknown action"}, status=400)
 
-# --- FUNCIONES DE STREAMING Y M3U ---
+# --- FUNCIONES DE STREAMING ---
 def stream_redirect(request, username, password, stream_id, ext=None):
+    """Valida al usuario y lo redirige a la fuente original del video."""
     try:
         user = UsuarioIPTV.objects.get(username=username, password=password, activo=True)
         canal = Canal.objects.get(id=stream_id)
         
+        # Agregamos los headers de tu script de Flask
         response = redirect(canal.url_origen)
-        response['Access-Control-Allow-Origin'] = '*' # Header de tu Flask
+        response['Access-Control-Allow-Origin'] = '*'
+        response['Cache-Control'] = 'no-cache'
         return response
     except:
         return HttpResponse("Error", status=404)
+
+# (El resto de funciones get_m3u y reseller_panel quedan igual)
 
 def get_m3u(request):
     """Genera el archivo .m3u dinámico para el usuario."""
