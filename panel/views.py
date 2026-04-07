@@ -8,14 +8,18 @@ from django.utils import timezone
 from datetime import timedelta
 import time
 
-# --- API XTREAM CODES (FIXED FOR WEB PLAYER) ---
 def player_api(request):
     u, p, action = request.GET.get('username'), request.GET.get('password'), request.GET.get('action')
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
-        user.ultima_actividad = timezone.now(); user.save()
-    except: return JsonResponse({"error": "Auth failed"}, status=403)
+        # Actualizamos actividad solo en el login inicial para no saturar la DB
+        if not action:
+            user.ultima_actividad = timezone.now()
+            user.save()
+    except UsuarioIPTV.DoesNotExist:
+        return JsonResponse({"error": "Auth failed"}, status=403)
     
+    # 1. INFORMACIÓN DE USUARIO Y SERVIDOR (LOGIN)
     if not action:
         return JsonResponse({
             "user_info": {
@@ -32,7 +36,7 @@ def player_api(request):
             },
             "server_info": {
                 "url": "1.lurzatv.com.ar",
-                "port": "80",
+                "port": "80", # Si usas el puerto 8000 en dev, cámbialo aquí
                 "https_port": "443",
                 "server_protocol": "http",
                 "rtmp_port": "80",
@@ -40,77 +44,199 @@ def player_api(request):
                 "timestamp": int(time.time())
             }
         })
-    elif action == "get_live_categories": 
-        return JsonResponse([{"category_id": str(c.id), "category_name": c.nombre} for c in Categoria.objects.all()], safe=False)
-    elif action == "get_live_streams": 
-        return JsonResponse([{"num": i+1, "name": c.nombre, "stream_id": c.id, "category_id": str(c.categoria.id), "container_extension": "m3u8"} for i, c in enumerate(Canal.objects.all())], safe=False)
-    return JsonResponse([], safe=False)
 
-# (El resto de tus funciones stream_redirect, get_m3u y reseller_panel se mantienen igual...)
+    # 2. CATEGORÍAS DE CANALES EN VIVO
+    elif action == "get_live_categories": 
+        return JsonResponse([
+            {"category_id": str(c.id), "category_name": c.nombre, "parent_id": 0} 
+            for c in Categoria.objects.all()
+        ], safe=False)
+
+    # 3. LISTADO DE CANALES (STREAMS)
+    elif action == "get_live_streams": 
+        streams = []
+        for i, c in enumerate(Canal.objects.all()):
+            streams.append({
+                "num": i + 1,
+                "name": c.nombre,
+                "stream_id": int(c.id), # Smarters prefiere INT aquí
+                "stream_icon": c.logo if c.logo else "", # CRÍTICO: Para ver logos
+                "epg_channel_id": None,
+                "added": "1613563200",
+                "category_id": str(c.categoria.id),
+                "custom_sid": "",
+                "tv_archive": 0,
+                "direct_source": "",
+                "tv_archive_duration": 0,
+                "thumbnail": "",
+                "container_extension": "m3u8"
+            })
+        return JsonResponse(streams, safe=False)
+
+    # 4. SOPORTE PARA VOD Y SERIES (Evita errores de carga en Smarters)
+    elif action in ["get_vod_categories", "get_vod_streams", "get_series_categories", "get_series"]:
+        return JsonResponse([], safe=False)
+
+    return JsonResponse({"error": "Unknown action"}, status=400)
+
+# --- FUNCIONES DE STREAMING Y M3U ---
 def stream_redirect(request, username, password, stream_id, ext=None):
+    """Valida al usuario y lo redirige a la fuente original del video."""
     try:
         user = UsuarioIPTV.objects.get(username=username, password=password, activo=True)
-        user.ultima_actividad = timezone.now(); user.save()
-        return redirect(Canal.objects.get(id=stream_id).url_origen)
-    except: return HttpResponse("Offline", status=404)
+        user.ultima_actividad = timezone.now()
+        user.save()
+        canal = Canal.objects.get(id=stream_id)
+        return redirect(canal.url_origen)
+    except (UsuarioIPTV.DoesNotExist, Canal.DoesNotExist):
+        return HttpResponse("Offline o No Autorizado", status=404)
 
 def get_m3u(request):
+    """Genera el archivo .m3u dinámico para el usuario."""
     u, p = request.GET.get('u'), request.GET.get('p')
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
         m3u = "#EXTM3U\n"
-        for c in Canal.objects.all(): m3u += f'#EXTINF:-1 tvg-logo="{c.logo}",{c.nombre}\nhttp://1.lurzatv.com.ar/live/{u}/{p}/{c.id}.m3u8\n'
+        # Usamos el dominio de producción por defecto
+        dominio = "1.lurzatv.com.ar" 
+        for c in Canal.objects.all():
+            m3u += f'#EXTINF:-1 tvg-logo="{c.logo}",{c.nombre}\n'
+            m3u += f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8\n'
         return HttpResponse(m3u, content_type='audio/x-mpegurl')
-    except: return HttpResponse("Forbidden", status=403)
+    except UsuarioIPTV.DoesNotExist:
+        return HttpResponse("Forbidden", status=403)
 
+# --- PANEL DE RESELLERS ---
 @login_required
 def reseller_panel(request):
-    try: reseller = Reseller.objects.get(user=request.user)
-    except: return HttpResponse("No eres reseller", status=403)
+    try:
+        reseller = Reseller.objects.get(user=request.user)
+    except Reseller.DoesNotExist:
+        return HttpResponse("No eres reseller", status=403)
+
     if request.method == "POST":
-        accion = request.POST.get('accion'); u_id = request.POST.get('user_id'); s_id = request.POST.get('sub_id')
+        accion = request.POST.get('accion')
+        u_id = request.POST.get('user_id')
+        s_id = request.POST.get('sub_id')
+
+        # --- GESTIÓN DE USUARIOS IPTV ---
         if accion == "crear_user":
-            u_n, u_p, p_id = request.POST.get('username'), request.POST.get('password'), request.POST.get('plan_id')
-            plan = Plan.objects.get(id=p_id)
-            exp = timezone.now() + (timedelta(hours=plan.horas) if plan.horas > 0 else timedelta(days=30 * plan.meses))
-            UsuarioIPTV.objects.create(username=u_n, password=u_p, reseller=reseller, plan=plan, fecha_expiracion=exp)
-            messages.success(request, f"Cliente {u_n} creado.")
-        elif accion == "editar_user" and u_id:
-            ui = UsuarioIPTV.objects.get(id=u_id, reseller=reseller)
-            ui.username, ui.password = request.POST.get('username'), request.POST.get('password')
-            ui.save(); messages.success(request, "Cliente actualizado.")
+            u_n, u_p = request.POST.get('username'), request.POST.get('password')
+            plan = Plan.objects.get(id=request.POST.get('plan_id'))
+            
+            if reseller.creditos >= plan.costo_creditos:
+                # Usa la lógica del modelo para calcular horas (demo) o meses (pago)
+                exp = plan.calcular_expiracion()
+                UsuarioIPTV.objects.create(
+                    username=u_n, password=u_p, 
+                    reseller=reseller, plan=plan, 
+                    fecha_expiracion=exp
+                )
+                
+                if plan.costo_creditos > 0:
+                    reseller.creditos -= plan.costo_creditos
+                    reseller.save()
+                    messages.success(request, f"Cliente {u_n} creado ({plan.meses} mes/es).")
+                else:
+                    messages.success(request, f"Demo {u_n} creada por {plan.horas} horas.")
+            else:
+                messages.error(request, "Créditos insuficientes para este plan.")
+
         elif accion == "renovar" and u_id:
             ui = UsuarioIPTV.objects.get(id=u_id, reseller=reseller)
-            if ui.plan.horas == 0 and reseller.creditos >= ui.plan.costo_creditos:
-                ui.fecha_expiracion = (ui.fecha_expiracion if ui.fecha_expiracion > timezone.now() else timezone.now()) + timedelta(days=30)
-                reseller.creditos -= ui.plan.costo_creditos
-                reseller.save(); ui.save(); messages.success(request, "Renovado.")
-            else: messages.error(request, "Créditos insuficientes.")
+            
+            # CONVERSIÓN: De Demo a Plan Real
+            if ui.plan.costo_creditos == 0:
+                # Buscamos plan de 1 mes que cueste créditos
+                plan_mensual = Plan.objects.filter(costo_creditos__gt=0, meses__gte=1).first()
+                
+                if not plan_mensual:
+                    messages.error(request, "No hay un plan mensual de pago configurado.")
+                elif reseller.creditos >= plan_mensual.costo_creditos:
+                    ui.plan = plan_mensual
+                    ui.fecha_expiracion = timezone.now() + timedelta(days=30)
+                    ui.save()
+                    reseller.creditos -= plan_mensual.costo_creditos
+                    reseller.save()
+                    messages.success(request, f"¡{ui.username} ahora es cliente oficial por 1 mes!")
+                else:
+                    messages.error(request, "Créditos insuficientes para convertir demo.")
+            
+            # RENOVACIÓN NORMAL: Sumar tiempo al plan actual
+            else:
+                if reseller.creditos >= ui.plan.costo_creditos:
+                    ui.fecha_expiracion = ui.plan.calcular_expiracion(ui.fecha_expiracion)
+                    reseller.creditos -= ui.plan.costo_creditos
+                    reseller.save()
+                    ui.save()
+                    messages.success(request, f"Usuario {ui.username} renovado.")
+                else:
+                    messages.error(request, "Créditos insuficientes.")
+
+        elif accion == "editar_user" and u_id:
+            ui = UsuarioIPTV.objects.get(id=u_id, reseller=reseller)
+            ui.username = request.POST.get('username')
+            ui.password = request.POST.get('password')
+            ui.save()
+            messages.success(request, "Datos actualizados.")
+
         elif accion == "borrar" and u_id:
-            UsuarioIPTV.objects.get(id=u_id, reseller=reseller).delete(); messages.warning(request, "Borrado.")
+            UsuarioIPTV.objects.get(id=u_id, reseller=reseller).delete()
+            messages.warning(request, "Usuario eliminado.")
+
+        # --- GESTIÓN DE SUB-RESELLERS (SUPER) ---
         elif reseller.es_super:
             if accion == "crear_sub":
-                sn, sp, sc = request.POST.get('sub_username'), request.POST.get('sub_password'), int(request.POST.get('sub_creditos', 0))
+                sn, sp = request.POST.get('sub_username'), request.POST.get('sub_password')
+                sc = int(request.POST.get('sub_creditos', 0))
                 if reseller.creditos >= sc:
                     new_u = User.objects.create_user(username=sn, password=sp)
-                    Reseller.objects.create(user=new_u, creditos=sc, padre=reseller)
-                    reseller.creditos -= sc; reseller.save(); messages.success(request, "Vendedor creado.")
-            elif accion == "editar_reseller" and s_id:
-                sub = Reseller.objects.get(id=s_id, padre=reseller)
-                sub.user.username = request.POST.get('sub_username')
-                if request.POST.get('sub_password'): sub.user.set_password(request.POST.get('sub_password'))
-                sub.user.save(); messages.success(request, "Vendedor actualizado.")
+                    Reseller.objects.create(user=new_u, creditos=sc, padre=reseller, password_plano=sp)
+                    reseller.creditos -= sc
+                    reseller.save()
+                    messages.success(request, f"Vendedor {sn} creado.")
+                else:
+                    messages.error(request, "No tienes créditos suficientes.")
+
             elif accion == "cargar_creditos" and s_id:
                 amt = int(request.POST.get('extra_creditos', 0))
                 if reseller.creditos >= amt:
                     sub = Reseller.objects.get(id=s_id, padre=reseller)
-                    sub.creditos += amt; sub.save()
-                    reseller.creditos -= amt; reseller.save(); messages.success(request, "Créditos cargados.")
+                    sub.creditos += amt
+                    reseller.creditos -= amt
+                    sub.save(); reseller.save()
+                    messages.success(request, "Créditos cargados al sub-reseller.")
+                else:
+                    messages.error(request, "Saldo insuficiente para transferir.")
+
+            elif accion == "editar_reseller" and s_id:
+                # CORRECCIÓN AQUÍ: Guardar el objeto User correctamente
+                sub_reseller = Reseller.objects.get(id=s_id, padre=reseller)
+                user_to_edit = sub_reseller.user
+                
+                nuevo_nombre = request.POST.get('sub_username')
+                nueva_pass = request.POST.get('sub_password')
+                
+                if nuevo_nombre:
+                    user_to_edit.username = nuevo_nombre
+                if nueva_pass:
+                    user_to_edit.set_password(nueva_pass)
+                    sub_reseller.password_plano = nueva_pass
+                
+                user_to_edit.save() # Guardar el User es lo que persiste el cambio de nombre
+                messages.success(request, f"Vendedor {nuevo_nombre} actualizado correctamente.")        
+
             elif accion == "borrar_reseller" and s_id:
                 sub = Reseller.objects.get(id=s_id, padre=reseller)
-                u_del = sub.user; sub.delete(); u_del.delete(); messages.error(request, "Vendedor eliminado.")
+                u_del = sub.user
+                sub.delete(); u_del.delete()
+                messages.error(request, "Vendedor eliminado.")
+
         return redirect('reseller_panel')
+
     return render(request, 'panel/reseller.html', {
-        'reseller': reseller, 'usuarios': UsuarioIPTV.objects.filter(reseller=reseller),
-        'planes': Plan.objects.all(), 'subs': Reseller.objects.filter(padre=reseller) if reseller.es_super else None
+        'reseller': reseller, 
+        'usuarios': UsuarioIPTV.objects.filter(reseller=reseller),
+        'planes': Plan.objects.all(), 
+        'subs': Reseller.objects.filter(padre=reseller) if reseller.es_super else None
     })
