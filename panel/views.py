@@ -122,35 +122,41 @@ def stream_redirect(request, username, password, stream_id, ext=None):
 
 def get_m3u(request):
     """Genera el archivo .m3u dinámico para el usuario."""
-    u, p = request.GET.get('u'), request.GET.get('p')
+    u = request.GET.get('u')
+    p = request.GET.get('p')
+    
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
         
-        # Construcción de la lista con formato estándar
-        m3u_content = ["#EXTM3U"]
+        # El encabezado DEBE ser la primera línea sin espacios antes
+        m3u_lines = ["#EXTM3U"]
         
         dominio = "1.lurzatv.com.ar"
-        canales = Canal.objects.all()
+        # Traemos canales con su categoría para evitar consultas extra
+        canales = Canal.objects.select_related('categoria').all()
         
         for c in canales:
-            # Formato: #EXTINF:-1 tvg-id="ID" tvg-name="Nombre" tvg-logo="URL",Nombre
-            linea_info = f'#EXTINF:-1 tvg-logo="{c.logo}" group-title="{c.categoria.nombre}",{c.nombre}'
-            m3u_content.append(linea_info)
+            # Construimos la línea de metadatos
+            # Es vital que el logo y el nombre no tengan caracteres raros
+            logo = c.logo if c.logo else ""
+            cat_nombre = c.categoria.nombre if c.categoria else "General"
             
-            # URL del stream que apunta a tu redirect
-            url_stream = f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8'
-            m3u_content.append(url_stream)
+            m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}",{c.nombre}')
+            m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
         
-        # Unimos todo con saltos de línea
-        full_m3u = "\n".join(m3u_content)
+        # Unimos con \r\n que es lo que Smarters prefiere para parsear
+        output = "\r\n".join(m3u_lines)
         
-        # Importante: El content_type debe ser application/x-mpegurl para Smarters
-        return HttpResponse(full_m3u, content_type='application/x-mpegurl')
+        response = HttpResponse(output, content_type='application/x-mpegurl')
+        # Forzamos la descarga como archivo para que la app no se confunda
+        response['Content-Disposition'] = 'attachment; filename="playlist.m3u"'
+        return response
         
     except UsuarioIPTV.DoesNotExist:
-        return HttpResponse("Usuario no encontrado o inactivo", status=403)
+        return HttpResponse("Invalid Credentials", status=403)
     except Exception as e:
-        return HttpResponse(f"Error interno: {str(e)}", status=500)
+        # Si hay un error, lo mostramos para debuguear en el navegador
+        return HttpResponse(f"Error: {str(e)}", status=500)
 
 # --- PANEL DE RESELLERS ---
 @login_required
