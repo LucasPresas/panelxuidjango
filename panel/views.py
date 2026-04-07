@@ -125,15 +125,32 @@ def get_m3u(request):
     u, p = request.GET.get('u'), request.GET.get('p')
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
-        m3u = "#EXTM3U\n"
-        # Usamos el dominio de producción por defecto
-        dominio = "1.lurzatv.com.ar" 
-        for c in Canal.objects.all():
-            m3u += f'#EXTINF:-1 tvg-logo="{c.logo}",{c.nombre}\n'
-            m3u += f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8\n'
-        return HttpResponse(m3u, content_type='audio/x-mpegurl')
+        
+        # Construcción de la lista con formato estándar
+        m3u_content = ["#EXTM3U"]
+        
+        dominio = "1.lurzatv.com.ar"
+        canales = Canal.objects.all()
+        
+        for c in canales:
+            # Formato: #EXTINF:-1 tvg-id="ID" tvg-name="Nombre" tvg-logo="URL",Nombre
+            linea_info = f'#EXTINF:-1 tvg-logo="{c.logo}" group-title="{c.categoria.nombre}",{c.nombre}'
+            m3u_content.append(linea_info)
+            
+            # URL del stream que apunta a tu redirect
+            url_stream = f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8'
+            m3u_content.append(url_stream)
+        
+        # Unimos todo con saltos de línea
+        full_m3u = "\n".join(m3u_content)
+        
+        # Importante: El content_type debe ser application/x-mpegurl para Smarters
+        return HttpResponse(full_m3u, content_type='application/x-mpegurl')
+        
     except UsuarioIPTV.DoesNotExist:
-        return HttpResponse("Forbidden", status=403)
+        return HttpResponse("Usuario no encontrado o inactivo", status=403)
+    except Exception as e:
+        return HttpResponse(f"Error interno: {str(e)}", status=500)
 
 # --- PANEL DE RESELLERS ---
 @login_required
