@@ -9,34 +9,37 @@ from datetime import timedelta
 import time
 
 def player_api(request):
-    u, p, action = request.GET.get('username'), request.GET.get('password'), request.GET.get('action')
+    u = request.GET.get('username')
+    p = request.GET.get('password')
+    action = request.GET.get('action')
+
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
-        # Actualizamos actividad solo en el login inicial para no saturar la DB
         if not action:
             user.ultima_actividad = timezone.now()
             user.save()
     except UsuarioIPTV.DoesNotExist:
-        return JsonResponse({"error": "Auth failed"}, status=403)
-    
-    # 1. INFORMACIÓN DE USUARIO Y SERVIDOR (LOGIN)
+        return JsonResponse({"error": "Unauthorized"}, status=403)
+
+    # LOGIN INICIAL
     if not action:
         return JsonResponse({
             "user_info": {
-                "username": user.username,
-                "password": user.password,
                 "auth": 1,
                 "status": "Active",
                 "exp_date": str(int(user.fecha_expiracion.timestamp())),
-                "is_trial": "0",
+                "username": user.username,
+                "password": user.password,
+                "message": "Bienvenido a Lurzavic",
                 "active_cons": "0",
                 "max_connections": str(user.plan.max_conexiones),
+                "is_trial": "0",
                 "revocation": "0",
                 "trial_finished": False
             },
             "server_info": {
-                "url": "1.lurzatv.com.ar",
-                "port": "80", # Si usas el puerto 8000 en dev, cámbialo aquí
+                "url": request.get_host().split(':')[0],
+                "port": "80",
                 "https_port": "443",
                 "server_protocol": "http",
                 "rtmp_port": "80",
@@ -45,51 +48,61 @@ def player_api(request):
             }
         })
 
-    # 2. CATEGORÍAS DE CANALES EN VIVO
-    elif action == "get_live_categories": 
+    # CATEGORÍAS
+    elif action == "get_live_categories":
         return JsonResponse([
-            {"category_id": str(c.id), "category_name": c.nombre, "parent_id": 0} 
+            {
+                "category_id": str(c.id), 
+                "category_name": c.nombre, 
+                "parent_id": 0 # Agregado para paridad con Flask
+            } 
             for c in Categoria.objects.all()
         ], safe=False)
 
-    # 3. LISTADO DE CANALES (STREAMS)
-    elif action == "get_live_streams": 
+    # CANALES (Versión detallada para evitar crash)
+    elif action == "get_live_streams":
+        category_id = request.GET.get('category_id')
+        canales = Canal.objects.all()
+        
+        if category_id and category_id != "0":
+            canales = canales.filter(categoria_id=category_id)
+
         streams = []
-        for i, c in enumerate(Canal.objects.all()):
+        for i, c in enumerate(canales):
             streams.append({
                 "num": i + 1,
                 "name": c.nombre,
-                "stream_id": int(c.id), # Smarters prefiere INT aquí
-                "stream_icon": c.logo if c.logo else "", # CRÍTICO: Para ver logos
-                "epg_channel_id": None,
-                "added": "1613563200",
+                "stream_type": "live", # CRÍTICO
+                "stream_id": int(c.id),
+                "stream_icon": c.logo if c.logo else "",
+                "epg_channel_id": "", 
+                "added": "1625000000",
                 "category_id": str(c.categoria.id),
                 "custom_sid": "",
                 "tv_archive": 0,
                 "direct_source": "",
-                "tv_archive_duration": 0,
                 "thumbnail": "",
                 "container_extension": "m3u8"
             })
         return JsonResponse(streams, safe=False)
 
-    # 4. SOPORTE PARA VOD Y SERIES (Evita errores de carga en Smarters)
-    elif action in ["get_vod_categories", "get_vod_streams", "get_series_categories", "get_series"]:
-        return JsonResponse([], safe=False)
+    # VOD y SERIES (Vacío pero formato correcto)
+    elif action in ["get_vod_streams", "get_vod_categories", "get_series", "get_series_categories"]:
+        return JsonResponse([], safe=False) 
 
     return JsonResponse({"error": "Unknown action"}, status=400)
 
 # --- FUNCIONES DE STREAMING Y M3U ---
 def stream_redirect(request, username, password, stream_id, ext=None):
-    """Valida al usuario y lo redirige a la fuente original del video."""
     try:
         user = UsuarioIPTV.objects.get(username=username, password=password, activo=True)
-        user.ultima_actividad = timezone.now()
-        user.save()
         canal = Canal.objects.get(id=stream_id)
-        return redirect(canal.url_origen)
-    except (UsuarioIPTV.DoesNotExist, Canal.DoesNotExist):
-        return HttpResponse("Offline o No Autorizado", status=404)
+        
+        response = redirect(canal.url_origen)
+        response['Access-Control-Allow-Origin'] = '*' # Header de tu Flask
+        return response
+    except:
+        return HttpResponse("Error", status=404)
 
 def get_m3u(request):
     """Genera el archivo .m3u dinámico para el usuario."""
