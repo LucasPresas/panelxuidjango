@@ -217,13 +217,7 @@ def get_m3u(request):
             # ── Proveedor channels ──
             if canal.proveedor_id:
                 m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}" tvh-chnum="0",{c.nombre}')
-                
-                if canal.proveedor_source == "claro":
-                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
-                else:
-                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
-                else:
-                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
+                m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
             else:
                 m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}",{c.nombre}')
                 m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
