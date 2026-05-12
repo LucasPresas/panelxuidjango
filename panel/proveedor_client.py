@@ -1,9 +1,9 @@
 """
-LUMIXTV PLUS - API Client
+Cliente API para proveedor de TV
 Protocolo de encriptación RSA + AES para canales de TV.
 
 Uso:
-    from lumix_client import LumixClient
+    from proveedor_client import LumixClient
     client = LumixClient("email", "password")
     channels = client.get_stix_channels()
     details = client.get_channel_details(1693)

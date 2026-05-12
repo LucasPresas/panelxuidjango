@@ -9,11 +9,11 @@ from urllib.parse import urlencode
 import requests
 from django.core.cache import cache
 
-from .lumix_client import LumixClient
+from .proveedor_client import LumixClient
 from .flow_cdn import resolve_flow_token
 
 
-CACHE_PREFIX = "lumix_"
+CACHE_PREFIX = "prov_"
 CACHE_TTL = 3600
 AES_CACHE_TTL = 7200
 
@@ -158,7 +158,7 @@ def import_all_channels():
                 "category": cat_name,
                 "name": sample.get("name", ""),
                 "logo": sample.get("logo", sample.get("image", "")),
-                "lumix_id": channel_id,
+                "proveedor_id": channel_id,
             })
 
     try:
@@ -174,7 +174,7 @@ def import_all_channels():
                     "category": cat_name,
                     "name": sample.get("name", ""),
                     "logo": sample.get("logo", sample.get("image", "")),
-                    "lumix_id": channel_id,
+                    "proveedor_id": channel_id,
                 })
     except Exception:
         pass
@@ -183,7 +183,7 @@ def import_all_channels():
 
 
 def sync_canales():
-    """Sync all lumixtv channels into Canal model."""
+    """Sync all proveedor channels into Canal model."""
     from .models import Categoria, Canal
 
     imported = import_all_channels()
@@ -192,8 +192,8 @@ def sync_canales():
     for ch in imported:
         cat, _ = Categoria.objects.get_or_create(nombre=ch["category"])
         canal, was_created = Canal.objects.update_or_create(
-            lumix_id=ch["lumix_id"],
-            lumix_source=ch["source"],
+            proveedor_id=ch["proveedor_id"],
+            proveedor_source=ch["source"],
             defaults={
                 "nombre": ch["name"],
                 "categoria": cat,

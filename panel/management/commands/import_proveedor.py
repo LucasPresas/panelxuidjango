@@ -1,19 +1,19 @@
 """
-Management command to import all LUMIXTV channels into the Canal model.
-Usage: python manage.py import_lumix [--force]
+Management command to import all ProveedorTV channels into the Canal model.
+Usage: python manage.py import_proveedor [--force]
 """
 from django.core.management.base import BaseCommand, CommandError
-from panel.lumix_provider import sync_canales
+from panel.proveedor_provider import sync_canales
 
 
 class Command(BaseCommand):
-    help = "Importa todos los canales de LUMIXTV a las tablas Canal y Categoria"
+    help = "Importa todos los canales del proveedor a las tablas Canal y Categoria"
 
     def add_arguments(self, parser):
         parser.add_argument(
             "--force",
             action="store_true",
-            help="Ignorar caché y forzar fetch desde lumixtv.es",
+            help="Ignorar caché y forzar fetch desde el proveedor",
         )
 
     def handle(self, *args, **options):
@@ -21,9 +21,9 @@ class Command(BaseCommand):
         if force:
             from django.core.cache import cache
             cache.clear()
-            self.stdout.write("Caché limpiada. Forzando fetch desde lumixtv.es...")
+            self.stdout.write("Caché limpiada. Forzando fetch...")
 
-        self.stdout.write("Sincronizando canales desde LUMIXTV...")
+        self.stdout.write("Sincronizando canales desde el proveedor...")
         try:
             result = sync_canales()
             self.stdout.write(self.style.SUCCESS(

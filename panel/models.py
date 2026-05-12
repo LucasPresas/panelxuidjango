@@ -12,9 +12,9 @@ class Canal(models.Model):
     categoria = models.ForeignKey(Categoria, on_delete=models.CASCADE)
     url_origen = models.URLField(blank=True, null=True)
     logo = models.URLField(blank=True, null=True)
-    lumix_id = models.CharField(max_length=20, blank=True, null=True, db_index=True)
-    lumix_source = models.CharField(max_length=20, blank=True, null=True, help_text="stix / claro / directo")
-    lumix_data = models.JSONField(blank=True, null=True, help_text="Metadata cruda de lumixtv")
+    proveedor_id = models.CharField(max_length=20, blank=True, null=True, db_index=True)
+    proveedor_source = models.CharField(max_length=20, blank=True, null=True, help_text="stix / claro / directo")
+    proveedor_data = models.JSONField(blank=True, null=True, help_text="Metadata cruda del proveedor")
     def __str__(self): return self.nombre
 
 class Plan(models.Model):

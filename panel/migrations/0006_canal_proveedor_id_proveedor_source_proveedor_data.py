@@ -10,17 +10,17 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='canal',
-            name='lumix_data',
-            field=models.JSONField(blank=True, null=True, help_text='Metadata cruda de lumixtv'),
+            name='proveedor_data',
+            field=models.JSONField(blank=True, null=True, help_text='Metadata cruda del proveedor'),
         ),
         migrations.AddField(
             model_name='canal',
-            name='lumix_id',
+            name='proveedor_id',
             field=models.CharField(blank=True, db_index=True, max_length=20, null=True),
         ),
         migrations.AddField(
             model_name='canal',
-            name='lumix_source',
+            name='proveedor_source',
             field=models.CharField(blank=True, help_text='stix / claro / directo', max_length=20, null=True),
         ),
         migrations.AlterField(

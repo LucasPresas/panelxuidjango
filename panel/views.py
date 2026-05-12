@@ -10,7 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 import time
 import requests
 
-from . import lumix_provider
+from . import proveedor_provider
 
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
@@ -115,39 +115,39 @@ def player_api(request):
     return JsonResponse({"error": "Unknown action"}, status=400)
 
 
-# --- ENDPOINTS LUMIXTV ---
+# --- ENDPOINTS PROVEEDOR ---
 
 @csrf_exempt
-def lumix_clearkey(request, channel_id):
+def proveedor_clearkey(request, channel_id):
     """Proxy para licencias ClearKey. Los players pueden llamar a este endpoint."""
     try:
-        keys = lumix_provider.get_clearkey(channel_id)
+        keys = proveedor_provider.get_clearkey(channel_id)
         return JsonResponse(keys)
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=502)
 
 
 @csrf_exempt
-def lumix_details(request, channel_id):
+def proveedor_details(request, channel_id):
     """Devuelve detalles completos de un canal lumixtv."""
     try:
-        details = lumix_provider.get_channel_details(channel_id)
-        resolved = lumix_provider.resolve_stream(details)
+        details = proveedor_provider.get_channel_details(channel_id)
+        resolved = proveedor_provider.resolve_stream(details)
         return JsonResponse({"details": details, "resolved": resolved})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=502)
 
 
 @login_required
-def lumix_sync(request):
+def proveedor_sync(request):
     """Importa/sincroniza todos los canales de lumixtv a la DB."""
     if not request.user.is_staff:
         return HttpResponse("Solo admin", status=403)
     try:
-        result = lumix_provider.sync_canales()
-        messages.success(request, f"LUMIXTV: {result['created']} creados, {result['updated']} actualizados ({result['total']} total)")
+        result = proveedor_provider.sync_canales()
+        messages.success(request, f"Proveedor: {result['created']} creados, {result['updated']} actualizados ({result['total']} total)")
     except Exception as e:
-        messages.error(request, f"Error en sync LUMIXTV: {e}")
+        messages.error(request, f"Error en sync proveedor: {e}")
     return redirect('/admin/panel/canal/')
 
 # --- FUNCIONES DE STREAMING ---
@@ -157,11 +157,11 @@ def stream_redirect(request, username, password, stream_id, ext=None):
         user = UsuarioIPTV.objects.get(username=username, password=password, activo=True)
         canal = Canal.objects.get(id=stream_id)
         
-        # ── Canal LUMIXTV: resolve dinámicamente ──
-        if canal.lumix_id:
+        # ── Canal Proveedor: resolve dinámicamente ──
+        if canal.proveedor_id:
             try:
-                details = lumix_provider.get_channel_details(canal.lumix_id)
-                resolved = lumix_provider.resolve_stream(details)
+                details = proveedor_provider.get_channel_details(canal.proveedor_id)
+                resolved = proveedor_provider.resolve_stream(details)
                 
                 if resolved["drm_scheme"] == "widevine":
                     return HttpResponse("Widevine DRM - requiere cliente compatible", status=501)
@@ -214,11 +214,13 @@ def get_m3u(request):
             logo = c.logo if c.logo else ""
             cat_nombre = c.categoria.nombre if c.categoria else "General"
             
-            # ── LUMIXTV channels ──
-            if c.lumix_id:
+            # ── Proveedor channels ──
+            if canal.proveedor_id:
                 m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}" tvh-chnum="0",{c.nombre}')
                 
-                if c.lumix_source == "claro":
+                if canal.proveedor_source == "claro":
+                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
+                else:
                     m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
                 else:
                     m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')

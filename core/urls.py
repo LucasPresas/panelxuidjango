@@ -22,8 +22,8 @@ urlpatterns = [
     path('live/<str:username>/<str:password>/<int:stream_id>.<str:ext>', views.stream_redirect, name='stream_redirect'),
     path('get.php', views.get_m3u, name='get_m3u'),
     
-    # LUMIXTV endpoints
-    path('lumix/clearkey/<str:channel_id>/', views.lumix_clearkey, name='lumix_clearkey'),
-    path('lumix/details/<str:channel_id>/', views.lumix_details, name='lumix_details'),
-    path('lumix/sync/', views.lumix_sync, name='lumix_sync'),
+    # Proveedor endpoints
+    path('proveedor/clearkey/<str:channel_id>/', views.proveedor_clearkey, name='proveedor_clearkey'),
+    path('proveedor/details/<str:channel_id>/', views.proveedor_details, name='proveedor_details'),
+    path('proveedor/sync/', views.proveedor_sync, name='proveedor_sync'),
 ]
