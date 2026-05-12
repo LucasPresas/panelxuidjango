@@ -36,9 +36,9 @@ class CategoriaAdmin(ModelAdmin):
 # --- ADMIN DE CANALES CON BOTÓN M3U GRANDE ---
 @admin.register(Canal)
 class CanalAdmin(ModelAdmin):
-    list_display = ('nombre', 'categoria', 'url_origen')
-    list_filter = ('categoria',)
-    search_fields = ('nombre',)
+    list_display = ('nombre', 'categoria', 'lumix_id', 'lumix_source', 'url_origen')
+    list_filter = ('categoria', 'lumix_source')
+    search_fields = ('nombre', 'lumix_id')
     
     # Cambiamos el template de la lista solo para este modelo
     change_list_template = "admin/panel/canal/change_list.html"

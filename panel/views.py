@@ -1,4 +1,4 @@
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, StreamingHttpResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -8,16 +8,9 @@ from django.utils import timezone
 from datetime import timedelta
 from django.views.decorators.csrf import csrf_exempt
 import time
+import requests
 
-from django.http import JsonResponse, HttpResponse
-from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
-from django.contrib import messages
-from .models import UsuarioIPTV, Canal, Categoria, Reseller, Plan
-from django.utils import timezone
-from datetime import timedelta
-import time
+from . import lumix_provider
 
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
 # --- API XTREAM CODES (PARA REPRODUCTORES Y WEB PLAYER) ---
@@ -121,6 +114,42 @@ def player_api(request):
 
     return JsonResponse({"error": "Unknown action"}, status=400)
 
+
+# --- ENDPOINTS LUMIXTV ---
+
+@csrf_exempt
+def lumix_clearkey(request, channel_id):
+    """Proxy para licencias ClearKey. Los players pueden llamar a este endpoint."""
+    try:
+        keys = lumix_provider.get_clearkey(channel_id)
+        return JsonResponse(keys)
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+@csrf_exempt
+def lumix_details(request, channel_id):
+    """Devuelve detalles completos de un canal lumixtv."""
+    try:
+        details = lumix_provider.get_channel_details(channel_id)
+        resolved = lumix_provider.resolve_stream(details)
+        return JsonResponse({"details": details, "resolved": resolved})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=502)
+
+
+@login_required
+def lumix_sync(request):
+    """Importa/sincroniza todos los canales de lumixtv a la DB."""
+    if not request.user.is_staff:
+        return HttpResponse("Solo admin", status=403)
+    try:
+        result = lumix_provider.sync_canales()
+        messages.success(request, f"LUMIXTV: {result['created']} creados, {result['updated']} actualizados ({result['total']} total)")
+    except Exception as e:
+        messages.error(request, f"Error en sync LUMIXTV: {e}")
+    return redirect('/admin/panel/canal/')
+
 # --- FUNCIONES DE STREAMING ---
 def stream_redirect(request, username, password, stream_id, ext=None):
     """Valida al usuario y lo redirige a la fuente original del video."""
@@ -128,13 +157,44 @@ def stream_redirect(request, username, password, stream_id, ext=None):
         user = UsuarioIPTV.objects.get(username=username, password=password, activo=True)
         canal = Canal.objects.get(id=stream_id)
         
-        # Agregamos los headers de tu script de Flask
+        # ── Canal LUMIXTV: resolve dinámicamente ──
+        if canal.lumix_id:
+            try:
+                details = lumix_provider.get_channel_details(canal.lumix_id)
+                resolved = lumix_provider.resolve_stream(details)
+                
+                if resolved["drm_scheme"] == "widevine":
+                    return HttpResponse("Widevine DRM - requiere cliente compatible", status=501)
+                
+                target_url = resolved["url"]
+                headers = resolved.get("headers", {})
+                
+                # For Flow channels, we need to proxy (CDN token in URL already)
+                # For direct channels, just redirect
+                response = redirect(target_url)
+                response['Access-Control-Allow-Origin'] = '*'
+                response['Cache-Control'] = 'no-cache'
+                for k, v in headers.items():
+                    if k.lower() not in ("authorization",):
+                        response[k] = v
+                return response
+            except Exception as e:
+                return HttpResponse(f"Error resolviendo canal: {e}", status=502)
+        
+        # ── Canal normal: redirect directo ──
+        if not canal.url_origen:
+            return HttpResponse("URL no configurada", status=404)
+        
         response = redirect(canal.url_origen)
         response['Access-Control-Allow-Origin'] = '*'
         response['Cache-Control'] = 'no-cache'
         return response
-    except:
-        return HttpResponse("Error", status=404)
+    except UsuarioIPTV.DoesNotExist:
+        return HttpResponse("Credenciales inválidas", status=403)
+    except Canal.DoesNotExist:
+        return HttpResponse("Canal no encontrado", status=404)
+    except Exception as e:
+        return HttpResponse(f"Error: {e}", status=500)
 
 # (El resto de funciones get_m3u y reseller_panel quedan igual)
 
@@ -146,34 +206,35 @@ def get_m3u(request):
     try:
         user = UsuarioIPTV.objects.get(username=u, password=p, activo=True)
         
-        # El encabezado DEBE ser la primera línea sin espacios antes
         m3u_lines = ["#EXTM3U"]
-        
-        dominio = "1.lurzatv.com.ar"
-        # Traemos canales con su categoría para evitar consultas extra
+        dominio = request.get_host()
         canales = Canal.objects.select_related('categoria').all()
         
         for c in canales:
-            # Construimos la línea de metadatos
-            # Es vital que el logo y el nombre no tengan caracteres raros
             logo = c.logo if c.logo else ""
             cat_nombre = c.categoria.nombre if c.categoria else "General"
             
-            m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}",{c.nombre}')
-            m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
+            # ── LUMIXTV channels ──
+            if c.lumix_id:
+                m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}" tvh-chnum="0",{c.nombre}')
+                
+                if c.lumix_source == "claro":
+                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
+                else:
+                    m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
+            else:
+                m3u_lines.append(f'#EXTINF:-1 tvg-logo="{logo}" group-title="{cat_nombre}",{c.nombre}')
+                m3u_lines.append(f'http://{dominio}/live/{u}/{p}/{c.id}.m3u8')
         
-        # Unimos con \r\n que es lo que Smarters prefiere para parsear
         output = "\r\n".join(m3u_lines)
         
         response = HttpResponse(output, content_type='application/x-mpegurl')
-        # Forzamos la descarga como archivo para que la app no se confunda
         response['Content-Disposition'] = 'attachment; filename="playlist.m3u"'
         return response
         
     except UsuarioIPTV.DoesNotExist:
         return HttpResponse("Invalid Credentials", status=403)
     except Exception as e:
-        # Si hay un error, lo mostramos para debuguear en el navegador
         return HttpResponse(f"Error: {str(e)}", status=500)
 
 # --- PANEL DE RESELLERS ---
